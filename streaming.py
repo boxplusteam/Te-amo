@@ -14,7 +14,7 @@ CONFIG_FILE = os.path.join(BASE_PATH, "config.json")
 class HlsManagerPro:
     def __init__(self, root):
         self.root = root
-        self.root.title("Gestor IPTV PRO - V2.0 Avanzado")
+        self.root.title("Gestor IPTV PRO - V2.0 (Optimizado i5-3470)")
         self.root.geometry("1150x850")
         
         # Estilo Moderno
@@ -25,11 +25,11 @@ class HlsManagerPro:
         self.autostart_tiempo = 120
         self.autostart_activo = True
         
-        # Estructura base con valores optimizados
+        # Estructura base con valores optimizados para ahorro
         self.config_data = {
             "cloudflare_url": "", 
-            "default_res": "480",        # Por defecto una calidad media/baja para ahorrar
-            "default_bitrate": "1200k",  # Bitrate ideal para 480p estable
+            "default_res": "480",        # 480p es ideal para 4 canales en un i5 3470
+            "default_bitrate": "800k",   # Bajado a 800k para asegurar la red con 30 clientes
             "canales": {}
         }
 
@@ -61,19 +61,17 @@ class HlsManagerPro:
         frame_top.pack(fill=tk.X)
 
         # Opciones Globales (Resolución y Bitrate base)
-        global_frame = ttk.LabelFrame(frame_top, text=" Configuración Global (WiFi/Calidad) ", padding="10")
+        global_frame = ttk.LabelFrame(frame_top, text=" Configuración Global (Optimizada) ", padding="10")
         global_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
 
         ttk.Label(global_frame, text="Res. Base:").grid(row=0, column=0, padx=5, pady=2)
         self.var_global_res = tk.StringVar(value=self.config_data.get("default_res", "480"))
-        # Lista de resoluciones estándar
         cb_global_res = ttk.Combobox(global_frame, textvariable=self.var_global_res, values=["360", "480", "720", "1080"], width=8, state="readonly")
         cb_global_res.grid(row=0, column=1, padx=5, pady=2)
 
         ttk.Label(global_frame, text="Bitrate Base:").grid(row=0, column=2, padx=5, pady=2)
-        self.var_global_bitrate = tk.StringVar(value=self.config_data.get("default_bitrate", "1200k"))
-        # Escala de bitrates: 800k (móvil) hasta 4500k (Full HD)
-        cb_global_bit = ttk.Combobox(global_frame, textvariable=self.var_global_bitrate, values=["800k", "1200k", "1500k", "2500k", "3000k", "4500k"], width=10)
+        self.var_global_bitrate = tk.StringVar(value=self.config_data.get("default_bitrate", "800k"))
+        cb_global_bit = ttk.Combobox(global_frame, textvariable=self.var_global_bitrate, values=["500k", "800k", "1200k", "1500k", "2500k"], width=10)
         cb_global_bit.grid(row=0, column=3, padx=5, pady=2)
         
         ttk.Button(global_frame, text="Guardar Globales", command=self.guardar_globales).grid(row=0, column=4, padx=10)
@@ -146,7 +144,7 @@ class HlsManagerPro:
         ttk.Combobox(q_frame, textvariable=self.var_ind_res, values=["Por defecto", "360", "480", "720", "1080"], width=12, state="readonly").pack(side=tk.LEFT, padx=5)
         
         ttk.Label(q_frame, text="Bitrate:").pack(side=tk.LEFT, padx=(10,0))
-        ttk.Combobox(q_frame, textvariable=self.var_ind_bitrate, values=["Por defecto", "800k", "1200k", "1500k", "2500k", "3000k", "4500k"], width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Combobox(q_frame, textvariable=self.var_ind_bitrate, values=["Por defecto", "500k", "800k", "1200k", "1500k", "2500k"], width=12).pack(side=tk.LEFT, padx=5)
 
         tk.Button(f, text="💾 GUARDAR CANAL", command=self.guardar_canal, bg="#ff9800", fg="white", relief="flat", font=('Segoe UI', 9, 'bold')).grid(row=3, column=1, pady=10, sticky="w")
 
@@ -155,8 +153,8 @@ class HlsManagerPro:
     def calcular_bufsize(self, bitrate_str):
         try:
             val = int(bitrate_str.lower().replace('k', ''))
-            return f"{val * 2}k" # El buffer suele ser el doble del bitrate para evitar saltos
-        except: return "2500k"
+            return f"{val * 2}k"
+        except: return "1500k"
 
     def iniciar_ffmpeg(self, cid):
         canal = self.config_data["canales"].get(cid)
@@ -167,21 +165,33 @@ class HlsManagerPro:
         
         # Lógica de prioridad: Calidad Individual > Calidad Global
         res_final = self.config_data.get("default_res", "480") if canal.get("res") == "Por defecto" else canal.get("res")
-        bit_final = self.config_data.get("default_bitrate", "1200k") if canal.get("bitrate") == "Por defecto" else canal.get("bitrate")
+        bit_final = self.config_data.get("default_bitrate", "800k") if canal.get("bitrate") == "Por defecto" else canal.get("bitrate")
         buf_final = self.calcular_bufsize(bit_final)
 
         output = os.path.join(ruta_hls, "index.m3u8")
         
-        # Comando optimizado: preset superfast para CPU lenta, b:v para limitar WiFi
+        # --- COMANDO EXTREMADAMENTE OPTIMIZADO PARA i5 3470 ---
+        # -reconnect* : Evita que se cierre si la fuente original falla momentáneamente.
+        # -threads 1 : CRUCIAL para que los 4 canales no peleen por la CPU.
+        # -tune zerolatency -profile:v baseline : Máxima velocidad y compatibilidad en dispositivos bajos.
+        # -r 25 : Baja a 25 fps para ahorrar un 20% de consumo de CPU.
+        # -c:a aac -b:a 64k : Audio comprimido al máximo para ahorrar internet a esos 30 usuarios.
+        
         cmd = (
-            f'ffmpeg -y -i "{canal["url"]}" '
-            f'-c:v libx264 -preset superfast -crf 26 '
+            f'ffmpeg -y '
+            f'-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+            f'-i "{canal["url"]}" '
+            f'-c:v libx264 -preset ultrafast -tune zerolatency -profile:v baseline '
+            f'-threads 1 -r 25 '
             f'-b:v {bit_final} -maxrate {bit_final} -bufsize {buf_final} '
-            f'-vf "scale=-2:{res_final}" -c:a aac -b:a 96k '
-            f'-f hls -hls_time 6 -hls_list_size 5 -hls_flags delete_segments "{output}"'
+            f'-vf "scale=-2:{res_final}" '
+            f'-c:a aac -b:a 64k -ac 2 '
+            f'-f hls -hls_time 4 -hls_list_size 6 -hls_flags delete_segments+independent_segments '
+            f'"{output}"'
         )
         
-        subprocess.Popen(f'start "{cid}" cmd /k {cmd}', shell=True)
+        # Abrir ventana minimizada para no saturar visualmente Windows
+        subprocess.Popen(f'start /min "{cid}" cmd /c {cmd}', shell=True)
         self.tree.set(cid, "Estado", "▶ EN CURSO")
 
     # --- AUXILIARES ---
@@ -239,7 +249,7 @@ class HlsManagerPro:
         def tarea():
             for cid in self.config_data["canales"]:
                 self.iniciar_ffmpeg(cid)
-                time.sleep(5) # Espera entre canales para no saturar
+                time.sleep(8) # He subido a 8 seg de espera para no ahogar la CPU al arrancar todos de golpe
         threading.Thread(target=tarea, daemon=True).start()
 
     def cancelar_autostart(self):
