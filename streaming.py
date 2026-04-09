@@ -1,213 +1,269 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import re
 import os
+import shutil
 import subprocess
 import json
+import threading
 import time
+import tkinter as tk
+from tkinter import ttk, messagebox
 
 # --- CONFIGURACIÓN DE RUTAS ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(SCRIPT_DIR, "config_hls.json")
 BASE_PATH = r"C:\hls"
+CONFIG_FILE = os.path.join(BASE_PATH, "config.json")
 
-class AceStreamHLS:
+class HlsManagerPro:
     def __init__(self, root):
         self.root = root
-        self.root.title("AceStream HLS Manager Pro - Ultra Stable")
-        self.root.geometry("850x650")
+        self.root.title("Gestor IPTV PRO - V2.0 Avanzado")
+        self.root.geometry("1150x850")
         
-        # 1. Limpieza radical al iniciar
-        self.kill_all_ffmpeg_system()
-
-        # Asegurar carpetas
-        if not os.path.exists(BASE_PATH):
-            os.makedirs(BASE_PATH, exist_ok=True)
-
-        self.channels = self.load_config()
-        self.active_processes = {}
-
-        self.setup_ui()
+        # Estilo Moderno
+        self.style = ttk.Style(self.root)
+        self.style.theme_use("clam")
+        self.configurar_estilos()
         
-        # 2. AUTOSTART: Iniciar todos los canales guardados automáticamente
-        # Esperamos 2 segundos para dar tiempo a que el sistema limpie procesos previos
-        self.root.after(2000, self.start_all)
+        self.autostart_tiempo = 120
+        self.autostart_activo = True
+        
+        # Estructura base con valores optimizados
+        self.config_data = {
+            "cloudflare_url": "", 
+            "default_res": "480",        # Por defecto una calidad media/baja para ahorrar
+            "default_bitrate": "1200k",  # Bitrate ideal para 480p estable
+            "canales": {}
+        }
 
-    def kill_all_ffmpeg_system(self):
+        self.preparar_entorno()
+        self.cargar_datos() 
+        self.construir_interfaz()
+        self.actualizar_tabla()
+        self.iniciar_cuenta_atras()
+
+    def configurar_estilos(self):
+        bg_color = "#f4f6f9"
+        self.root.configure(bg=bg_color)
+        self.style.configure("TFrame", background=bg_color)
+        self.style.configure("TLabelframe", background=bg_color, font=("Segoe UI", 10, "bold"))
+        self.style.configure("TLabelframe.Label", background=bg_color, foreground="#333333")
+        self.style.configure("TLabel", background=bg_color, font=("Segoe UI", 10))
+        self.style.configure("TButton", font=("Segoe UI", 9, "bold"), padding=5)
+        self.style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background="#e1e6eb")
+        self.style.configure("Treeview", font=("Segoe UI", 9), rowheight=25)
+
+    def preparar_entorno(self):
+        if not os.path.exists(BASE_PATH): os.makedirs(BASE_PATH)
+        if not os.path.exists(CONFIG_FILE):
+            self.guardar_json()
+
+    def construir_interfaz(self):
+        # --- PANEL SUPERIOR ---
+        frame_top = ttk.Frame(self.root, padding="10 10 10 0")
+        frame_top.pack(fill=tk.X)
+
+        # Opciones Globales (Resolución y Bitrate base)
+        global_frame = ttk.LabelFrame(frame_top, text=" Configuración Global (WiFi/Calidad) ", padding="10")
+        global_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        ttk.Label(global_frame, text="Res. Base:").grid(row=0, column=0, padx=5, pady=2)
+        self.var_global_res = tk.StringVar(value=self.config_data.get("default_res", "480"))
+        # Lista de resoluciones estándar
+        cb_global_res = ttk.Combobox(global_frame, textvariable=self.var_global_res, values=["360", "480", "720", "1080"], width=8, state="readonly")
+        cb_global_res.grid(row=0, column=1, padx=5, pady=2)
+
+        ttk.Label(global_frame, text="Bitrate Base:").grid(row=0, column=2, padx=5, pady=2)
+        self.var_global_bitrate = tk.StringVar(value=self.config_data.get("default_bitrate", "1200k"))
+        # Escala de bitrates: 800k (móvil) hasta 4500k (Full HD)
+        cb_global_bit = ttk.Combobox(global_frame, textvariable=self.var_global_bitrate, values=["800k", "1200k", "1500k", "2500k", "3000k", "4500k"], width=10)
+        cb_global_bit.grid(row=0, column=3, padx=5, pady=2)
+        
+        ttk.Button(global_frame, text="Guardar Globales", command=self.guardar_globales).grid(row=0, column=4, padx=10)
+
+        # Cloudflare y Timer
+        cf_frame = ttk.LabelFrame(frame_top, text=" Sistema ", padding="10")
+        cf_frame.pack(side=tk.RIGHT, fill=tk.BOTH)
+
+        self.lbl_timer = tk.Label(cf_frame, text="Autostart: 120s", font=('Segoe UI', 10, 'bold'), fg="red", bg="#f4f6f9")
+        self.lbl_timer.pack(side=tk.LEFT, padx=10)
+        tk.Button(cf_frame, text="Parar", command=self.cancelar_autostart, bg="#ff5252", fg="white", relief="flat", padx=10).pack(side=tk.LEFT)
+
+        # --- PANEL CENTRAL: Tabla ---
+        table_frame = ttk.Frame(self.root, padding="10")
+        table_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.tree = ttk.Treeview(table_frame, columns=("ID", "Nombre", "Grupo", "Res", "Bitrate", "Estado"), show="headings")
+        self.tree.heading("ID", text="ID")
+        self.tree.heading("Nombre", text="Canal")
+        self.tree.heading("Grupo", text="Grupo")
+        self.tree.heading("Res", text="Resolución")
+        self.tree.heading("Bitrate", text="Bitrate")
+        self.tree.heading("Estado", text="Estado")
+        
+        for col in ("ID", "Res", "Bitrate"): self.tree.column(col, width=80, anchor="center")
+        self.tree.pack(fill=tk.BOTH, expand=True)
+        self.tree.bind("<<TreeviewSelect>>", self.cargar_datos_formulario)
+
+        # --- PANEL CONTROLES ---
+        frame_ctrl = ttk.Frame(self.root, padding="10")
+        frame_ctrl.pack(fill=tk.X)
+
+        tk.Button(frame_ctrl, text="▶ INICIAR CANAL", command=self.iniciar_seleccionado, bg="#4caf50", fg="white", relief="flat", width=18).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_ctrl, text="⏹ DETENER CANAL", command=self.detener_seleccionado, bg="#f44336", fg="white", relief="flat", width=18).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_ctrl, text="🚀 INICIAR TODOS", command=self.iniciar_todos_hilo, bg="#2196f3", fg="white", relief="flat", font=('Segoe UI', 9, 'bold')).pack(side=tk.RIGHT, padx=5)
+
+        # --- FORMULARIO ---
+        self.crear_formulario()
+
+    def crear_formulario(self):
+        f = ttk.LabelFrame(self.root, text=" Añadir / Editar Canal ", padding="15")
+        f.pack(fill=tk.X, padx=10, pady=10)
+
+        self.var_id = tk.StringVar()
+        self.var_nom = tk.StringVar()
+        self.var_grp = tk.StringVar(value="TV")
+        self.var_img = tk.StringVar()
+        self.var_url = tk.StringVar()
+        self.var_ind_res = tk.StringVar(value="Por defecto")
+        self.var_ind_bitrate = tk.StringVar(value="Por defecto")
+
+        # Layout del formulario
+        ttk.Label(f, text="ID/Carpeta:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(f, textvariable=self.var_id, width=15).grid(row=0, column=1, sticky="w", padx=5)
+        
+        ttk.Label(f, text="Nombre:").grid(row=0, column=2, sticky="e")
+        ttk.Entry(f, textvariable=self.var_nom, width=30).grid(row=0, column=3, sticky="w", padx=5)
+
+        ttk.Label(f, text="URL Stream:").grid(row=1, column=0, sticky="w", pady=10)
+        ttk.Entry(f, textvariable=self.var_url, width=80).grid(row=1, column=1, columnspan=4, sticky="w", padx=5)
+
+        # Selección de calidad individual
+        lbl_q = ttk.Label(f, text="Ajuste de Calidad:")
+        lbl_q.grid(row=2, column=0, sticky="w")
+        
+        q_frame = ttk.Frame(f)
+        q_frame.grid(row=2, column=1, columnspan=4, sticky="w")
+        
+        ttk.Label(q_frame, text="Res:").pack(side=tk.LEFT)
+        ttk.Combobox(q_frame, textvariable=self.var_ind_res, values=["Por defecto", "360", "480", "720", "1080"], width=12, state="readonly").pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(q_frame, text="Bitrate:").pack(side=tk.LEFT, padx=(10,0))
+        ttk.Combobox(q_frame, textvariable=self.var_ind_bitrate, values=["Por defecto", "800k", "1200k", "1500k", "2500k", "3000k", "4500k"], width=12).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(f, text="💾 GUARDAR CANAL", command=self.guardar_canal, bg="#ff9800", fg="white", relief="flat", font=('Segoe UI', 9, 'bold')).grid(row=3, column=1, pady=10, sticky="w")
+
+    # --- LÓGICA DE PROCESAMIENTO ---
+
+    def calcular_bufsize(self, bitrate_str):
         try:
-            if os.name == 'nt':
-                subprocess.run("taskkill /F /IM ffmpeg.exe /T", shell=True, capture_output=True)
-        except: pass
+            val = int(bitrate_str.lower().replace('k', ''))
+            return f"{val * 2}k" # El buffer suele ser el doble del bitrate para evitar saltos
+        except: return "2500k"
 
-    def setup_ui(self):
-        style = ttk.Style()
-        style.configure("TButton", font=("Segoe UI", 9))
-
-        top_frame = ttk.LabelFrame(self.root, text=" Configuración de Canal ", padding=10)
-        top_frame.pack(fill=tk.X, padx=10, pady=10)
-
-        ttk.Label(top_frame, text="ID AceStream:").grid(row=0, column=0, sticky=tk.W)
-        self.url_entry = ttk.Entry(top_frame, width=55)
-        self.url_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        ttk.Label(top_frame, text="Carpeta (c1, c2...):").grid(row=1, column=0, sticky=tk.W)
-        self.name_entry = ttk.Entry(top_frame, width=15)
-        self.name_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
-
-        ttk.Label(top_frame, text="Calidad:").grid(row=1, column=1, sticky=tk.E)
-        self.quality_var = tk.StringVar(value="720p")
-        self.quality_combo = ttk.Combobox(top_frame, textvariable=self.quality_var, values=["720p", "480p"], state="readonly", width=8)
-        self.quality_combo.grid(row=1, column=2, padx=5, pady=5)
-
-        ttk.Button(top_frame, text="Guardar y Lanzar", command=self.add_channel).grid(row=0, column=2, padx=5, pady=5)
-
-        ctrl_frame = ttk.Frame(self.root, padding=5)
-        ctrl_frame.pack(fill=tk.X, padx=10)
-
-        ttk.Button(ctrl_frame, text="▶ START TODOS", command=self.start_all).pack(side=tk.LEFT, padx=2)
-        ttk.Button(ctrl_frame, text="■ STOP TODOS", command=self.stop_all).pack(side=tk.LEFT, padx=2)
+    def iniciar_ffmpeg(self, cid):
+        canal = self.config_data["canales"].get(cid)
+        if not canal: return
         
-        self.status_global = ttk.Label(ctrl_frame, text="Estado: Listo", foreground="blue")
-        self.status_global.pack(side=tk.RIGHT, padx=10)
-
-        list_frame = ttk.LabelFrame(self.root, text=" Canales Registrados ", padding=10)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self.tree = ttk.Treeview(list_frame, columns=("ID", "Calidad", "Estado"), show='headings')
-        self.tree.heading("ID", text="Nombre/Carpeta")
-        self.tree.heading("Calidad", text="Calidad")
-        self.tree.heading("Estado", text="Status CMD")
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.tree.bind('<<TreeviewSelect>>', self.load_data_to_edit)
-        ttk.Button(list_frame, text="Eliminar", command=self.delete_channel).pack(side=tk.TOP, padx=5)
-
-    def extract_clean_id(self, text):
-        match = re.search(r'([a-fA-F0-9]{40})', text)
-        return match.group(1) if match else None
-
-    def load_data_to_edit(self, event):
-        selected = self.tree.selection()
-        if not selected: return
-        name = selected[0]
-        if name in self.channels:
-            data = self.channels[name]
-            self.name_entry.delete(0, tk.END)
-            self.name_entry.insert(0, name)
-            self.url_entry.delete(0, tk.END)
-            self.url_entry.insert(0, data['id'])
-            self.quality_var.set(data['quality'])
-
-    def add_channel(self):
-        name = self.name_entry.get().strip().lower()
-        raw_input = self.url_entry.get().strip()
-        quality = self.quality_var.get()
-        clean_id = self.extract_clean_id(raw_input)
-
-        if not name or not clean_id:
-            messagebox.showerror("Error", "ID o Nombre inválido")
-            return
-
-        os.makedirs(os.path.join(BASE_PATH, name), exist_ok=True)
-        self.stop_single_process(name)
-
-        self.channels[name] = {"id": clean_id, "quality": quality}
-        self.save_config()
-        self.run_ffmpeg(name, self.channels[name])
-        self.refresh_table()
-
-    def run_ffmpeg(self, name, data):
-        path = os.path.join(BASE_PATH, name)
-        v_bit = "1800k" if data['quality'] == "720p" else "1000k"
-        v_res = "720" if data['quality'] == "720p" else "480"
+        ruta_hls = os.path.join(BASE_PATH, cid)
+        if not os.path.exists(ruta_hls): os.makedirs(ruta_hls)
         
-        url = f"http://127.0.0.1:6878/ace/getstream?id={data['id']}"
-        output = f'"{os.path.join(path, "index.m3u8")}"'
+        # Lógica de prioridad: Calidad Individual > Calidad Global
+        res_final = self.config_data.get("default_res", "480") if canal.get("res") == "Por defecto" else canal.get("res")
+        bit_final = self.config_data.get("default_bitrate", "1200k") if canal.get("bitrate") == "Por defecto" else canal.get("bitrate")
+        buf_final = self.calcular_bufsize(bit_final)
 
-        # Cambiamos el comando para que si FFmpeg falla, la ventana NO se cierre (usando cmd /K)
-        # Esto permite leer el error exacto.
-        ffmpeg_cmd = (
-            f'ffmpeg -y -i "{url}" '
-            f'-c:v libx264 -preset superfast -b:v {v_bit} -maxrate {v_bit} -bufsize 3500k '
-            f'-vf "scale=-2:{v_res}" -c:a aac -b:a 128k '
-            f'-f hls -hls_time 6 -hls_list_size 5 -hls_flags delete_segments {output}'
+        output = os.path.join(ruta_hls, "index.m3u8")
+        
+        # Comando optimizado: preset superfast para CPU lenta, b:v para limitar WiFi
+        cmd = (
+            f'ffmpeg -y -i "{canal["url"]}" '
+            f'-c:v libx264 -preset superfast -crf 26 '
+            f'-b:v {bit_final} -maxrate {bit_final} -bufsize {buf_final} '
+            f'-vf "scale=-2:{res_final}" -c:a aac -b:a 96k '
+            f'-f hls -hls_time 6 -hls_list_size 5 -hls_flags delete_segments "{output}"'
         )
         
-        full_cmd = f'cmd /K "title FFmpeg_{name} && {ffmpeg_cmd}"'
+        subprocess.Popen(f'start "{cid}" cmd /k {cmd}', shell=True)
+        self.tree.set(cid, "Estado", "▶ EN CURSO")
 
-        try:
-            proc = subprocess.Popen(full_cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-            self.active_processes[name] = proc
-        except Exception as e:
-            print(f"Error lanzando canal {name}: {e}")
+    # --- AUXILIARES ---
 
-    def start_all(self):
-        if not self.channels:
-            self.status_global.config(text="Estado: Sin canales guardados", foreground="orange")
-            return
-            
-        for name, data in self.channels.items():
-            if name not in self.active_processes or self.active_processes[name].poll() is not None:
-                self.run_ffmpeg(name, data)
-        
-        self.status_global.config(text="Estado: AUTOSTART ACTIVADO", foreground="green")
-        self.refresh_table()
+    def guardar_globales(self):
+        self.config_data["default_res"] = self.var_global_res.get()
+        self.config_data["default_bitrate"] = self.var_global_bitrate.get()
+        self.guardar_json()
+        messagebox.showinfo("OK", "Configuración global actualizada.")
 
-    def stop_single_process(self, name):
-        if name in self.active_processes:
-            proc = self.active_processes[name]
-            try:
-                # En Windows, al usar 'cmd /K', hay que matar el árbol de procesos
-                subprocess.run(f"taskkill /F /T /PID {proc.pid}", shell=True, capture_output=True)
-            except: pass
-            del self.active_processes[name]
-
-    def stop_all(self):
-        for name in list(self.active_processes.keys()):
-            self.stop_single_process(name)
-        self.kill_all_ffmpeg_system()
-        self.status_global.config(text="Estado: TODO DETENIDO", foreground="red")
-        self.refresh_table()
-
-    def delete_channel(self):
-        selected = self.tree.selection()
-        if not selected: return
-        name = selected[0]
-        self.stop_single_process(name)
-        if name in self.channels:
-            del self.channels[name]
-            self.save_config()
-        self.refresh_table()
-
-    def refresh_table(self):
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-        for name, data in self.channels.items():
-            is_alive = name in self.active_processes and self.active_processes[name].poll() is None
-            status = "▶ ACTIVO" if is_alive else "■ STOP / ERROR"
-            self.tree.insert("", tk.END, iid=name, values=(name, data['quality'], status))
-
-    def save_config(self):
-        try:
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(self.channels, f, indent=4)
-        except Exception as e: print(f"Error guardando JSON: {e}")
-
-    def load_config(self):
+    def cargar_datos(self):
         if os.path.exists(CONFIG_FILE):
             try:
-                with open(CONFIG_FILE, 'r') as f:
-                    data = json.load(f)
-                    return data if isinstance(data, dict) else {}
-            except: return {}
-        return {}
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    self.config_data.update(json.load(f))
+            except: pass
 
-    def on_close(self):
-        self.stop_all()
-        self.root.destroy()
+    def guardar_json(self):
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.config_data, f, indent=4)
+
+    def guardar_canal(self):
+        cid = self.var_id.get().strip()
+        if not cid: return
+        self.config_data["canales"][cid] = {
+            "nombre": self.var_nom.get(),
+            "grupo": self.var_grp.get(),
+            "url": self.var_url.get(),
+            "res": self.var_ind_res.get(),
+            "bitrate": self.var_ind_bitrate.get(),
+            "logo": self.var_img.get()
+        }
+        self.guardar_json()
+        self.actualizar_tabla()
+        messagebox.showinfo("OK", f"Canal {cid} guardado.")
+
+    def actualizar_tabla(self):
+        self.tree.delete(*self.tree.get_children())
+        for cid, d in self.config_data["canales"].items():
+            self.tree.insert("", tk.END, iid=cid, values=(cid, d['nombre'], d['grupo'], d.get('res'), d.get('bitrate'), "⏹ Detenido"))
+
+    def iniciar_seleccionado(self):
+        sel = self.tree.selection()
+        if sel: self.iniciar_ffmpeg(sel[0])
+
+    def detener_seleccionado(self):
+        sel = self.tree.selection()
+        if sel:
+            cid = sel[0]
+            os.system(f'taskkill /fi "windowtitle eq {cid}*" /f')
+            self.tree.set(cid, "Estado", "⏹ Detenido")
+
+    def iniciar_todos_hilo(self):
+        self.cancelar_autostart()
+        def tarea():
+            for cid in self.config_data["canales"]:
+                self.iniciar_ffmpeg(cid)
+                time.sleep(5) # Espera entre canales para no saturar
+        threading.Thread(target=tarea, daemon=True).start()
+
+    def cancelar_autostart(self):
+        self.autostart_activo = False
+        self.lbl_timer.config(text="AUTOSTART OFF", fg="grey")
+
+    def iniciar_cuenta_atras(self):
+        if self.autostart_activo and self.autostart_tiempo > 0:
+            self.lbl_timer.config(text=f"Autostart: {self.autostart_tiempo}s")
+            self.autostart_tiempo -= 1
+            self.root.after(1000, self.iniciar_cuenta_atras)
+        elif self.autostart_activo:
+            self.iniciar_todos_hilo()
+
+    def cargar_datos_formulario(self, event):
+        sel = self.tree.selection()
+        if not sel: return
+        cid = sel[0]
+        c = self.config_data["canales"][cid]
+        self.var_id.set(cid); self.var_nom.set(c['nombre'])
+        self.var_url.set(c['url']); self.var_ind_res.set(c.get('res', 'Por defecto'))
+        self.var_ind_bitrate.set(c.get('bitrate', 'Por defecto'))
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = AceStreamHLS(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_close)
+    app = HlsManagerPro(root)
     root.mainloop()
