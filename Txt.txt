@@ -1,0 +1,7 @@
+ffmpeg -i "http://127.0.0.1:6878/ace/getstream?id=af458073c3096293a4dea9f369d4f308e7125bd6&pid=11977" \
+-c copy \
+-f hls \
+-hls_time 10 \
+-hls_list_size 5 \
+-hls_flags delete_segments \
+"output.m3u8"
