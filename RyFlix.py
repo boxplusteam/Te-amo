@@ -3,13 +3,11 @@ import urllib.parse
 import json
 import shutil
 import re
-import random
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # --- CONFIGURACIÓN ---
 PORT = 8000
 MEDIA_DIR = "storage/downloads/flix"
-APK_NAME = "Ryflix.apk"
 
 class RyflixHandler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
@@ -28,16 +26,12 @@ class RyflixHandler(BaseHTTPRequestHandler):
 
         if parsed_path.path == '/' or parsed_path.path == '/index.html':
             self.serve_file('index.html', 'text/html')
-        elif parsed_path.path == '/flix.html':
-            self.serve_file('flix.html', 'text/html')
         elif parsed_path.path == '/api/media':
             self.serve_api(query)
         elif parsed_path.path == '/stream':
             self.serve_stream(query)
         elif parsed_path.path == '/img':
             self.serve_image(query)
-        elif parsed_path.path == f'/{APK_NAME}':
-            self.serve_apk()
         else:
             self.send_error(404, "No encontrado")
 
@@ -125,15 +119,6 @@ class RyflixHandler(BaseHTTPRequestHandler):
         with open(img_path, 'rb') as f:
             shutil.copyfileobj(f, self.wfile)
 
-    def serve_apk(self):
-        if not os.path.exists(APK_NAME): return self.send_error(404, "APK no encontrado")
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/vnd.android.package-archive')
-        self.send_header('Content-Disposition', f'attachment; filename="{APK_NAME}"')
-        self.end_headers()
-        with open(APK_NAME, 'rb') as f:
-            shutil.copyfileobj(f, self.wfile)
-
     def serve_stream(self, query):
         folder = query.get('folder', [''])[0]
         file = query.get('file', [''])[0]
@@ -165,13 +150,13 @@ class RyflixHandler(BaseHTTPRequestHandler):
             with open(path, 'rb') as f:
                 f.seek(byte1)
                 bytes_to_read = length
-                chunk_size = 8192
+                chunk_size = 1024 * 1024 # Buffer optimizado a 1MB
                 while bytes_to_read > 0:
                     chunk = f.read(min(chunk_size, bytes_to_read))
                     if not chunk: break
                     try:
                         self.wfile.write(chunk)
-                    except ConnectionError:
+                    except Exception:
                         break
                     bytes_to_read -= len(chunk)
         else:
@@ -182,191 +167,158 @@ class RyflixHandler(BaseHTTPRequestHandler):
             self.send_cors_headers()
             self.end_headers()
             with open(path, 'rb') as f:
-                shutil.copyfileobj(f, self.wfile)
+                shutil.copyfileobj(f, self.wfile, length=1024*1024)
 
 
-# --- GENERACIÓN AUTOMÁTICA DE HTMLs ---
+# --- GENERACIÓN AUTOMÁTICA DE HTML ---
 def generate_html_files():
     if not os.path.exists('index.html'):
         with open('index.html', 'w', encoding='utf-8') as f:
-            f.write(f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta http-equiv="refresh" content="5;url=/flix.html">
-    <title>Ryflix - Inicio</title>
-    <style>
-        body {{ background: #000; color: #fff; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; text-align: center; box-sizing: border-box; }}
-        .logo {{ color: #e50914; font-size: 2.5rem; font-weight: 900; text-transform: uppercase; margin-bottom: 20px; letter-spacing: 2px; }}
-        .card {{ background: #111; padding: 30px; border-radius: 8px; border: 1px solid #333; max-width: 500px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
-        h1 {{ font-size: 1.5rem; margin-top: 0; color: #ddd; }}
-        p {{ color: #888; font-size: 0.95rem; line-height: 1.5; text-align: justify; margin-bottom: 20px; }}
-        .apk-btn {{ display: inline-block; background: #e50914; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; margin-bottom: 20px; transition: background 0.2s; font-size: 1.1rem; }}
-        .apk-btn:active {{ background: #b20710; transform: scale(0.98); }}
-        .loader {{ width: 30px; height: 30px; border: 3px solid rgba(229,9,20,0.2); border-top-color: #e50914; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }}
-        .countdown {{ font-size: 0.9rem; color: #666; font-weight: bold; margin-bottom: 15px; }}
-        .webapp-link {{ color: #555; text-decoration: underline; font-size: 0.85rem; }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-    </style>
-</head>
-<body>
-    <div class="logo">RYFLIX</div>
-    <div class="card">
-        <h1>Bienvenido a Ryflix</h1>
-        <p>Al acceder a esta plataforma, aceptas que el contenido mostrado es de carácter personal, local y para uso privado sin conexión a internet. Esta es una WebApp nativa diseñada para consumo offline.</p>
-
-        <a href="/{APK_NAME}" class="apk-btn" download>Descargar App (APK)</a>
-
-        <div class="loader"></div>
-        <div class="countdown" id="cd-text">Redirigiendo a la WebApp en 5s...</div>
-        <a href="/flix.html" class="webapp-link">Ir a la WebApp directamente</a>
-    </div>
-    <script>
-        let secs = 4;
-        setInterval(() => {{
-            if(secs > 0) document.getElementById('cd-text').innerText = `Redirigiendo a la WebApp en ${{secs}}s...`;
-            secs--;
-        }}, 1000);
-    </script>
-</body>
-</html>""")
-
-    with open('flix.html', 'w', encoding='utf-8') as f:
-        f.write("""<!DOCTYPE html>
+            f.write("""<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#000000">
-    <title>Ryflix</title>
+    <meta name="theme-color" content="#09090e">
+    <title>Ryflix - Cuevana Premium</title>
     <style>
-        :root { --bg: #141414; --red: #E50914; --text: #fff; --card-bg: #222; }
+        :root { --bg: #09090e; --surface: #13131a; --red: #ff003c; --red-hover: #ff2a5f; --text: #ffffff; --text-muted: #a0a0ab; --border: rgba(255, 255, 255, 0.08); }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, sans-serif; user-select: none; }
         body { margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden; padding-bottom: 40px; overscroll-behavior-y: none; }
 
-        @keyframes fadeInScale { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        @keyframes fadeInScale { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
-        /* HEADER */
-        header { padding: env(safe-area-inset-top, 15px) 20px 15px; display: flex; justify-content: space-between; align-items: center; position: fixed; top: 0; width: 100%; background: linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, transparent 100%); z-index: 100; transition: background 0.3s; }
-        header.scrolled { background: rgba(20,20,20,0.95); backdrop-filter: blur(10px); }
-        .header-left { display: flex; align-items: center; gap: 15px; }
-        .logo { color: var(--red); font-size: 1.6rem; font-weight: 900; text-transform: uppercase; cursor: pointer; letter-spacing: 1.5px; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
-        .header-controls { display: flex; align-items: center; gap: 12px; }
+        /* HEADER al estilo Cuevana */
+        header { padding: env(safe-area-inset-top, 15px) 24px 15px; display: flex; justify-content: space-between; align-items: center; position: fixed; top: 0; width: 100%; background: linear-gradient(to bottom, rgba(9,9,14,0.95) 0%, rgba(9,9,14,0.8) 50%, transparent 100%); z-index: 100; transition: all 0.3s ease; }
+        header.scrolled { background: rgba(19,19,26,0.96); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); box-shadow: 0 4px 30px rgba(0,0,0,0.4); }
+        .logo { color: var(--text); font-size: 1.7rem; font-weight: 900; font-style: italic; cursor: pointer; letter-spacing: 0.5px; text-shadow: 0 0 15px rgba(255,0,60,0.6); }
+        .logo span { color: var(--red); }
+        .header-controls { display: flex; align-items: center; gap: 16px; }
 
-        .bt-border { background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 6px 14px; border-radius: 20px; font-weight: 600; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; backdrop-filter: blur(5px); }
-        .bt-border:active { transform: scale(0.95); }
-        .bt-border.active { border-color: var(--red); color: var(--text); background: var(--red); }
+        .bt-border { background: rgba(255,255,255,0.06); color: white; border: 1px solid var(--border); padding: 8px 18px; border-radius: 30px; font-weight: 600; cursor: pointer; font-size: 0.85rem; transition: all 0.2s ease; backdrop-filter: blur(5px); }
+        .bt-border:hover, .bt-border:active { background: rgba(255,255,255,0.12); transform: scale(0.96); }
+        .bt-border.active { border-color: var(--red); color: white; background: var(--red); box-shadow: 0 0 15px rgba(255,0,60,0.4); }
 
-        .search-box { display: flex; align-items: center; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 20px; transition: all 0.3s; }
-        .search-box input { background: transparent; border: none; color: white; outline: none; width: 100px; font-size: 0.9rem; transition: width 0.3s; }
-        .search-box input:focus { width: 140px; }
+        .search-box { display: flex; align-items: center; background: rgba(255,255,255,0.04); border: 1px solid var(--border); padding: 6px 14px; border-radius: 30px; transition: all 0.3s ease; }
+        .search-box:focus-within { border-color: rgba(255,0,60,0.5); background: rgba(255,255,255,0.07); }
+        .search-box input { background: transparent; border: none; color: white; outline: none; width: 110px; font-size: 0.9rem; transition: width 0.3s; }
+        .search-box input:focus { width: 160px; }
 
         /* HERO SLIDER */
-        .hero-slider { position: relative; width: 100%; height: 50vh; background: #000; overflow: hidden; display: none; }
-        .hero-slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 1s ease; background-size: cover; background-position: top center; display: flex; flex-direction: column; justify-content: flex-end; }
+        .hero-slider { position: relative; width: 100%; height: 55vh; background: #000; overflow: hidden; display: none; border-bottom: 1px solid var(--border); }
+        .hero-slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 1s cubic-bezier(0.4, 0, 0.2, 1); background-size: cover; background-position: center 20%; display: flex; flex-direction: column; justify-content: flex-end; }
         .hero-slide.active { opacity: 1; z-index: 2; }
-        .hero-slide::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 60%; background: linear-gradient(to top, var(--bg) 0%, transparent 100%); z-index: 0; }
-        .hero-content { position: relative; z-index: 3; padding: 20px; margin-bottom: 20px; text-align: center; }
-        .hero-title { font-size: 2rem; font-weight: 900; text-shadow: 0 2px 8px rgba(0,0,0,0.9); margin: 0 0 15px 0; }
-        .hero-btn { display: inline-flex; align-items: center; gap: 8px; background: white; color: black; border: none; padding: 10px 24px; border-radius: 4px; font-weight: bold; font-size: 1rem; cursor: pointer; }
-        .hero-btn svg { width: 24px; height: 24px; fill: black; }
+        .hero-slide::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 80%; background: linear-gradient(to top, var(--bg) 0%, rgba(9,9,14,0.4) 60%, transparent 100%); z-index: 0; }
+        .hero-content { position: relative; z-index: 3; padding: 24px; margin-bottom: 15px; text-align: center; max-width: 600px; margin-left: auto; margin-right: auto; }
+        .hero-title { font-size: 2.2rem; font-weight: 850; text-shadow: 0 2px 10px rgba(0,0,0,0.9); margin: 0 0 16px 0; letter-spacing: -0.5px; }
+        .hero-btn { display: inline-flex; align-items: center; gap: 10px; background: var(--red); color: white; border: none; padding: 12px 28px; border-radius: 30px; font-weight: 700; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 15px rgba(255,0,60,0.3); transition: all 0.2s; }
+        .hero-btn:active { transform: scale(0.95); background: var(--red-hover); }
+        .hero-btn svg { width: 20px; height: 20px; fill: white; }
 
-        /* CATALOG GRID */
-        .section-title { font-size: 1.25rem; margin: 20px 20px 15px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; padding: 0 20px; }
-        .card { background: var(--card-bg); border-radius: 6px; overflow: hidden; position: relative; cursor: pointer; animation: fadeInScale 0.3s ease-out backwards; box-shadow: 0 4px 10px rgba(0,0,0,0.6); transition: transform 0.2s; }
-        .card:active { transform: scale(0.95); }
-        .poster { width: 100%; aspect-ratio: 2/3; background: #111; display: flex; align-items: center; justify-content: center; }
-        .poster img { width: 100%; height: 100%; object-fit: cover; }
-        .poster-alt { font-size: 2.5rem; font-weight: 900; color: #333; text-transform: uppercase; }
-        .card-title { padding: 10px 8px; font-size: 0.8rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; background: linear-gradient(to top, #111, #1a1a1a); }
+        /* CATALOG GRID MÁS ESTILIZADO */
+        .section-title { font-size: 1.35rem; margin: 24px 24px 16px; font-weight: 800; letter-spacing: -0.3px; color: white; position: relative; display: inline-block; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); gap: 14px; padding: 0 24px; }
+        .card { background: var(--surface); border-radius: 10px; overflow: hidden; position: relative; cursor: pointer; animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards; border: 1px solid var(--border); transition: all 0.25s ease; }
+        .card:active { transform: scale(0.96); border-color: rgba(255,0,60,0.3); }
+        .poster { width: 100%; aspect-ratio: 2/3; background: #181824; display: flex; align-items: center; justify-content: center; }
+        .poster img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+        .poster-alt { font-size: 2.8rem; font-weight: 900; color: #2a2a3a; text-transform: uppercase; }
+        .card-title { padding: 12px 10px; font-size: 0.85rem; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: #f3f3f5; }
 
-        .fav-icon { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 10; }
-        .fav-icon svg { width: 16px; height: 16px; fill: white; }
-        .fav-icon.active svg { fill: var(--red); }
+        .fav-icon { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; background: rgba(19,19,26,0.7); backdrop-filter: blur(8px); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s; }
+        .fav-icon svg { width: 15px; height: 15px; fill: white; transition: transform 0.2s; }
+        .fav-icon.active { background: rgba(255,0,60,0.15); border-color: var(--red); }
+        .fav-icon.active svg { fill: var(--red); transform: scale(1.1); }
 
-        .loader { width: 26px; height: 26px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--red); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 30px auto; display: none; }
+        .loader { width: 32px; height: 32px; border: 3.5px solid rgba(255,255,255,0.05); border-top-color: var(--red); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 40px auto; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* --- SECCIÓN DE SERIES --- */
-        #seriesSection { display: none; min-height: 100vh; background: #000; position: relative; padding-bottom: 50px; }
-        .series-hero-bg { position: absolute; top: 0; left: 0; width: 100%; height: 65vh; background-size: cover; background-position: center top; z-index: 0; opacity: 0.35; filter: blur(10px); }
-        .series-hero-bg::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to top, #000 20%, transparent 100%); }
+        /* SECCIÓN DE DETALLES DE SERIES */
+        #seriesSection { display: none; min-height: 100vh; background: var(--bg); position: relative; padding-bottom: 60px; }
+        .series-hero-bg { position: absolute; top: 0; left: 0; width: 100%; height: 70vh; background-size: cover; background-position: center top; z-index: 0; opacity: 0.2; filter: blur(15px); }
+        .series-hero-bg::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to top, var(--bg) 15%, transparent 100%); }
 
-        .series-container { position: relative; z-index: 2; padding: calc(env(safe-area-inset-top, 20px) + 20px) 20px 20px; }
-        .series-header-nav { display: flex; align-items: center; margin-bottom: 30px; }
-        .back-btn { background: rgba(255,255,255,0.1); border-radius: 50%; border: none; width: 44px; height: 44px; display: flex; justify-content: center; align-items: center; cursor: pointer; backdrop-filter: blur(10px); }
-        .back-btn svg { width: 24px; height: 24px; fill: white; }
+        .series-container { position: relative; z-index: 2; padding: calc(env(safe-area-inset-top, 20px) + 24px) 24px 24px; }
+        .series-header-nav { display: flex; align-items: center; margin-bottom: 24px; }
+        .back-btn { background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 50%; width: 46px; height: 46px; display: flex; justify-content: center; align-items: center; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.2s; }
+        .back-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.12); }
+        .back-btn svg { width: 22px; height: 22px; fill: white; }
 
-        .series-details { display: flex; flex-direction: column; gap: 20px; margin-bottom: 40px; }
-        .series-poster-main { width: 140px; aspect-ratio: 2/3; border-radius: 8px; box-shadow: 0 8px 25px rgba(0,0,0,0.8); object-fit: cover; align-self: center; }
+        .series-details { display: flex; flex-direction: column; gap: 24px; margin-bottom: 40px; }
+        .series-poster-main { width: 150px; aspect-ratio: 2/3; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.7); object-fit: cover; align-self: center; border: 1px solid var(--border); }
         .series-info-text { text-align: center; }
-        .series-title-main { font-size: 2rem; font-weight: 800; text-shadow: 0 2px 10px rgba(0,0,0,0.9); margin: 0 0 10px 0; }
-        .series-meta { font-size: 0.9rem; color: #aaa; font-weight: 500; }
+        .series-title-main { font-size: 2.2rem; font-weight: 850; text-shadow: 0 2px 10px rgba(0,0,0,0.8); margin: 0 0 10px 0; letter-spacing: -0.5px; }
+        .series-meta { font-size: 0.95rem; color: var(--text-muted); font-weight: 600; }
 
-        .episodes-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 20px; border-left: 4px solid var(--red); padding-left: 10px; }
+        .episodes-title { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; border-left: 4px solid var(--red); padding-left: 12px; }
         .episodes-list { display: flex; flex-direction: column; gap: 12px; }
-        .episode-row { display: flex; align-items: center; gap: 15px; padding: 12px; background: rgba(255,255,255,0.04); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); cursor: pointer; transition: background 0.2s; }
-        .episode-row:active { background: rgba(255,255,255,0.12); }
+        .episode-row { display: flex; align-items: center; gap: 16px; padding: 14px; background: var(--surface); border-radius: 10px; border: 1px solid var(--border); cursor: pointer; transition: all 0.2s ease; }
+        .episode-row:active { background: rgba(255,255,255,0.05); border-color: rgba(255,0,60,0.2); }
 
-        .ep-thumb { width: 110px; aspect-ratio: 16/9; background: #222; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+        .ep-thumb { width: 120px; aspect-ratio: 16/9; background: #181824; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; flex-shrink: 0; }
         .ep-thumb img { width: 100%; height: 100%; object-fit: cover; }
-        .ep-thumb-icon { position: absolute; width: 24px; height: 24px; fill: white; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
+        .ep-thumb-icon { position: absolute; width: 26px; height: 26px; fill: white; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.7)); }
         .ep-info { flex: 1; overflow: hidden; }
-        .ep-title { font-size: 0.95rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
-        .ep-num { font-size: 0.8rem; color: #888; }
+        .ep-title { font-size: 0.95rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; color: #f3f3f5; }
+        .ep-num { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }
 
-        /* REPRODUCTOR */
+        /* REPRODUCTOR MÓVIL AVANZADO */
         .player-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 9999; display: none; flex-direction: column; }
         .player-modal.show { display: flex; }
         video { width: 100%; height: 100%; background: #000; object-fit: contain; }
         video.fit-16-9 { object-fit: fill; }
 
-        .player-ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; z-index: 10; opacity: 1; transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1); background: radial-gradient(circle, transparent 30%, rgba(0,0,0,0.7) 100%); }
+        .player-ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; z-index: 10; opacity: 1; transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1); background: radial-gradient(circle, transparent 20%, rgba(0,0,0,0.85) 100%); }
         .player-ui.hidden { opacity: 0; pointer-events: none; }
 
-        .p-top-bar { padding: env(safe-area-inset-top, 20px) 20px 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); display: flex; align-items: center; gap: 15px; }
-        .p-title { flex: 1; font-weight: 600; font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .p-top-bar { padding: env(safe-area-inset-top, 20px) 24px 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent); display: flex; align-items: center; gap: 16px; }
+        .p-title { flex: 1; font-weight: 700; font-size: 1.15rem; text-shadow: 0 2px 5px rgba(0,0,0,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        .p-center-area { flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-        .p-center-icon { width: 70px; height: 70px; background: rgba(0,0,0,0.6); border-radius: 50%; display: flex; justify-content: center; align-items: center; opacity: 0; transform: scale(0.8); transition: all 0.2s; pointer-events: none; }
-        .p-center-icon svg { width: 35px; height: 35px; fill: white; }
+        .p-center-area { flex: 1; display: flex; align-items: center; justify-content: center; gap: 40px; cursor: pointer; width: 100%; }
+        .p-center-icon { width: 66px; height: 66px; background: rgba(19,19,26,0.75); border: 1px solid var(--border); border-radius: 50%; display: flex; justify-content: center; align-items: center; opacity: 0; transform: scale(0.8); transition: all 0.2s ease-out; pointer-events: none; backdrop-filter: blur(8px); }
+        .p-center-icon svg { width: 30px; height: 30px; fill: white; }
         .p-center-icon.animate { opacity: 1; transform: scale(1.1); }
 
-        .p-bottom-bar { padding: 20px; padding-bottom: env(safe-area-inset-bottom, 25px); background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); display: flex; flex-direction: column; gap: 18px; }
+        .p-side-seek-btn { background: transparent; border: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-size: 0.75rem; font-weight: 700; gap: 4px; text-shadow: 0 2px 4px rgba(0,0,0,0.8); z-index: 12; }
+        .p-side-seek-btn svg { width: 36px; height: 36px; fill: white; transition: transform 0.15s; }
+        .p-side-seek-btn:active svg { transform: scale(0.85); }
+
+        .p-bottom-bar { padding: 24px; padding-bottom: env(safe-area-inset-bottom, 25px); background: linear-gradient(to top, rgba(0,0,0,0.95), transparent); display: flex; flex-direction: column; gap: 20px; }
 
         .p-timeline-container { width: 100%; height: 24px; display: flex; align-items: center; cursor: pointer; position: relative; }
-        .p-timeline-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; position: relative; }
-        .p-timeline-progress { height: 100%; background: var(--red); border-radius: 3px; width: 0%; position: absolute; }
-        .p-timeline-thumb { width: 16px; height: 16px; background: var(--red); border-radius: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); left: 0%; box-shadow: 0 0 6px rgba(0,0,0,0.6); }
+        .p-timeline-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.15); border-radius: 4px; position: relative; }
+        .p-timeline-progress { height: 100%; background: var(--red); border-radius: 4px; width: 0%; position: absolute; box-shadow: 0 0 10px rgba(255,0,60,0.5); }
+        .p-timeline-thumb { width: 16px; height: 16px; background: var(--red); border-radius: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); left: 0%; box-shadow: 0 0 8px rgba(0,0,0,0.8); }
 
         .p-controls-row { display: flex; justify-content: space-between; align-items: center; }
-        .p-controls-left, .p-controls-right { display: flex; align-items: center; gap: 25px; }
+        .p-controls-left, .p-controls-right { display: flex; align-items: center; gap: 28px; }
 
-        .p-icon-btn { background: transparent; border: none; padding: 0; cursor: pointer; display: flex; justify-content: center; align-items: center; }
-        .p-icon-btn svg { width: 30px; height: 30px; fill: white; }
+        .p-icon-btn { background: transparent; border: none; padding: 0; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: transform 0.15s; }
+        .p-icon-btn:active { transform: scale(0.9); }
+        .p-icon-btn svg { width: 32px; height: 32px; fill: white; }
 
-        .p-time { font-size: 0.9rem; opacity: 0.9; font-weight: 500; font-variant-numeric: tabular-nums; }
-        .p-res-btn { font-size: 0.85rem; font-weight: bold; color: white; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.4); padding: 5px 10px; border-radius: 6px; cursor: pointer; }
+        .p-time { font-size: 0.9rem; opacity: 0.9; font-weight: 600; font-variant-numeric: tabular-nums; color: #e3e3e8; }
+        .p-res-btn { font-size: 0.85rem; font-weight: 700; color: white; background: rgba(255,255,255,0.08); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
 
         @media (min-width: 768px) {
-            .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px; }
-            .series-details { flex-direction: row; align-items: flex-end; text-align: left; gap: 30px; margin-top: 20px; }
-            .series-poster-main { width: 180px; }
+            .grid { grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 18px; padding: 0 32px; }
+            .section-title { margin: 30px 32px 20px; font-size: 1.5rem; }
+            .series-details { flex-direction: row; align-items: flex-end; text-align: left; gap: 32px; margin-top: 20px; }
+            .series-poster-main { width: 190px; }
             .series-info-text { text-align: left; }
-            .series-title-main { font-size: 2.8rem; }
-            .episodes-list { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-            .p-icon-btn svg { width: 34px; height: 34px; }
+            .series-title-main { font-size: 3rem; }
+            .episodes-list { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .p-icon-btn svg { width: 36px; height: 36px; }
+            .p-side-seek-btn svg { width: 42px; height: 42px; font-size: 0.85rem; }
         }
     </style>
 </head>
 <body>
     <header id="appHeader">
         <div class="header-left">
-            <div class="logo" onclick="goHomeAction()">RYFLIX</div>
+            <div class="logo" onclick="goHomeAction()">RY<span>FLIX</span></div>
         </div>
         <div class="header-controls">
             <div class="search-box">
@@ -417,10 +369,20 @@ def generate_html_files():
             </div>
 
             <div class="p-center-area" id="centerArea">
+                <button class="p-side-seek-btn" id="seekBackCenterBtn">
+                    <svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
+                    <span>-10s</span>
+                </button>
+
                 <div class="p-center-icon" id="centerIcon">
                     <svg id="c-icon-play" style="display:none;" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                     <svg id="c-icon-pause" style="display:none;" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                 </div>
+
+                <button class="p-side-seek-btn" id="seekForwardCenterBtn">
+                    <svg viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
+                    <span>+10s</span>
+                </button>
             </div>
 
             <div class="p-bottom-bar">
@@ -437,8 +399,11 @@ def generate_html_files():
                             <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                             <svg id="icon-pause" style="display:none;" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                         </button>
-                        <button class="p-icon-btn" id="rewindBtn">
+                        <button class="p-icon-btn" id="rewindBtn" title="Retroceder 10s">
                             <svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
+                        </button>
+                        <button class="p-icon-btn" id="forwardBtn" title="Avanzar 10s">
+                            <svg viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
                         </button>
                         <div class="p-time"><span id="timeCurrent">00:00</span> / <span id="timeTotal">00:00</span></div>
                     </div>
@@ -462,7 +427,6 @@ def generate_html_files():
         let allMedia = [], currentFiltered = [];
         let favorites = JSON.parse(localStorage.getItem('ryflix_favs')) || [];
 
-        // SCROLL 30 EN 30 CONFIGURACIÓN
         let displayedCount = 0; const CHUNK_SIZE = 30; let showingFavs = false;
 
         let currentPlaylist = [];
@@ -477,12 +441,10 @@ def generate_html_files():
         const searchInput = document.getElementById('searchInput');
         const header = document.getElementById('appHeader');
 
-        // BOTÓN ATRÁS NATIVO - SISTEMA HISTORY API
         history.replaceState({view: 'home'}, '');
 
         window.addEventListener('popstate', (e) => {
             const view = e.state ? e.state.view : 'home';
-
             if (view === 'home') {
                 if (modal.classList.contains('show')) closePlayerUI();
                 seriesSection.style.display = 'none';
@@ -496,9 +458,8 @@ def generate_html_files():
             }
         });
 
-        // SCROLL 30 EN 30 LÓGICA
         window.addEventListener('scroll', () => {
-            if (window.scrollY > 50) header.classList.add('scrolled');
+            if (window.scrollY > 30) header.classList.add('scrolled');
             else header.classList.remove('scrolled');
 
             if (homeSection.style.display !== 'none' && !showingFavs) {
@@ -515,7 +476,7 @@ def generate_html_files():
                 loader.style.display = 'none';
                 initHeroSlider();
                 loadNextChunk();
-            }).catch(() => { loader.style.display = 'none'; grid.innerHTML = '<p>Error de conexión.</p>'; });
+            }).catch(() => { loader.style.display = 'none'; grid.innerHTML = '<p style="padding:24px;">Error de conexión.</p>'; });
         }
 
         function initHeroSlider() {
@@ -533,12 +494,11 @@ def generate_html_files():
                 slide.style.backgroundImage = imgUrl ? `url('${imgUrl}')` : 'none';
 
                 const itemJson = encodeURIComponent(JSON.stringify(item));
-
                 slide.innerHTML = `
                     <div class="hero-content">
                         <h2 class="hero-title">${item.name}</h2>
                         <button class="hero-btn" onclick="playHeroItem('${itemJson}')">
-                            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Reproducir
+                            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Ver Ahora
                         </button>
                     </div>
                 `;
@@ -559,11 +519,7 @@ def generate_html_files():
 
         window.playHeroItem = function(jsonStr) {
             const item = JSON.parse(decodeURIComponent(jsonStr));
-            if (item.is_folder || item.type === 'series') {
-                openSeries(item);
-            } else {
-                openPlayer(item, [item], 0);
-            }
+            if (item.is_folder || item.type === 'series') { openSeries(item); } else { openPlayer(item, [item], 0); }
         };
 
         function loadNextChunk() {
@@ -589,7 +545,7 @@ def generate_html_files():
 
             if (showingFavs) {
                 const favItems = allMedia.filter(item => favorites.includes(item.folder || item.file));
-                if (favItems.length === 0) grid.innerHTML = '<p style="margin:20px;">Lista vacía.</p>';
+                if (favItems.length === 0) grid.innerHTML = '<p style="margin:24px; color:var(--text-muted);">Tu lista está vacía.</p>';
                 else favItems.forEach(item => grid.appendChild(createCard(item)));
             } else { searchInput.value = ''; currentFiltered = [...allMedia]; displayedCount = 0; loadNextChunk(); }
         }
@@ -620,7 +576,6 @@ def generate_html_files():
             return card;
         }
 
-        /* ABRE LA SERIE Y REGISTRA HISTORY */
         function openSeries(serie) {
             history.pushState({view: 'series'}, '');
             homeSection.style.display = 'none';
@@ -628,14 +583,12 @@ def generate_html_files():
             window.scrollTo(0, 0);
 
             document.getElementById('seriesTitle').textContent = serie.name;
-
             const imgUrl = serie.image ? `${API}/img?path=${encodeURIComponent(serie.image)}` : '';
             document.getElementById('seriesHeroBg').style.backgroundImage = imgUrl ? `url('${imgUrl}')` : 'none';
             document.getElementById('seriesPoster').src = imgUrl || '';
             document.getElementById('seriesPoster').style.display = imgUrl ? 'block' : 'none';
 
-            const sList = document.getElementById('seriesList');
-            sList.innerHTML = '';
+            const sList = document.getElementById('seriesList'); sList.innerHTML = '';
             document.getElementById('seriesLoader').style.display = 'block';
 
             fetch(`${API}/api/media?folder=${encodeURIComponent(serie.folder || serie.name)}`)
@@ -643,19 +596,11 @@ def generate_html_files():
                     document.getElementById('seriesLoader').style.display = 'none';
                     document.getElementById('seriesMeta').textContent = `Serie • ${chapters.length} Episodios`;
                     chapters.forEach((chap, idx) => {
-                        const row = document.createElement('div');
-                        row.className = 'episode-row';
+                        const row = document.createElement('div'); row.className = 'episode-row';
                         const thumbHtml = imgUrl ? `<img src="${imgUrl}" loading="lazy">` : '';
-
                         row.innerHTML = `
-                            <div class="ep-thumb">
-                                ${thumbHtml}
-                                <svg class="ep-thumb-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            </div>
-                            <div class="ep-info">
-                                <div class="ep-title">${chap.name}</div>
-                                <div class="ep-num">Episodio ${idx + 1}</div>
-                            </div>
+                            <div class="ep-thumb">${thumbHtml}<svg class="ep-thumb-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+                            <div class="ep-info"><div class="ep-title">${chap.name}</div><div class="ep-num">Episodio ${idx + 1}</div></div>
                         `;
                         row.onclick = () => openPlayer(chap, chapters, idx);
                         sList.appendChild(row);
@@ -663,13 +608,9 @@ def generate_html_files():
                 });
         }
 
-        function goHomeAction() {
-            if (seriesSection.style.display === 'block' || modal.classList.contains('show')) {
-                history.back();
-            }
-        }
+        function goHomeAction() { if (seriesSection.style.display === 'block' || modal.classList.contains('show')) { history.back(); } }
 
-        // --- LÓGICA DEL REPRODUCTOR MÓVIL/TABLET ---
+        // --- LÓGICA DEL REPRODUCTOR MÓVIL ---
         const video = document.getElementById('mainVideo');
         const modal = document.getElementById('playerModal');
         const playerUI = document.getElementById('playerUI');
@@ -690,12 +631,14 @@ def generate_html_files():
         const timeTotal = document.getElementById('timeTotal');
         const nextChapBtn = document.getElementById('nextChapBtn');
         const rewindBtn = document.getElementById('rewindBtn');
+        const forwardBtn = document.getElementById('forwardBtn');
+        const seekBackCenterBtn = document.getElementById('seekBackCenterBtn');
+        const seekForwardCenterBtn = document.getElementById('seekForwardCenterBtn');
         const fullscreenBtn = document.getElementById('fullscreenBtn');
 
         function openPlayer(videoItem, playlist, index) {
             history.pushState({view: 'player'}, '');
-            currentPlaylist = playlist;
-            currentVideoIndex = index;
+            currentPlaylist = playlist; currentVideoIndex = index;
             currentVideoId = videoItem.folder ? `${videoItem.folder}_${videoItem.file}` : videoItem.file;
 
             document.getElementById('playerTitle').textContent = videoItem.name;
@@ -713,7 +656,6 @@ def generate_html_files():
                 const saved = localStorage.getItem('ry_prog_' + currentVideoId);
                 if (saved) video.currentTime = parseFloat(saved);
                 timeTotal.textContent = formatTime(video.duration);
-
                 video.play().then(() => {
                     iconPlay.style.display = 'none'; iconPause.style.display = 'block';
                 }).catch(() => {
@@ -722,9 +664,7 @@ def generate_html_files():
             };
         }
 
-        function closePlayerAction() {
-            history.back(); // Delega a PopState
-        }
+        function closePlayerAction() { history.back(); }
 
         function closePlayerUI() {
             modal.classList.remove('show');
@@ -734,45 +674,32 @@ def generate_html_files():
             if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
         }
 
-        // OCULTACIÓN INTELIGENTE DE BOTONES
         function resetUIActivity() {
             playerUI.classList.remove('hidden');
             clearTimeout(hideUITimeout);
-            if (!video.paused) {
-                hideUITimeout = setTimeout(() => { playerUI.classList.add('hidden'); }, 3000);
-            }
+            if (!video.paused) { hideUITimeout = setTimeout(() => { playerUI.classList.add('hidden'); }, 3000); }
         }
 
-        // Detectar movimiento sobre el UI
         playerUI.addEventListener('mousemove', resetUIActivity);
         playerUI.addEventListener('touchmove', resetUIActivity);
 
-        // CUANDO LA UI ESTÁ OCULTA (pointer-events: none), EL CLIC LLEGA AL VIDEO
-        video.addEventListener('click', () => {
-            if (playerUI.classList.contains('hidden')) {
-                resetUIActivity(); // Un toque para mostrar
-            }
-        });
+        video.addEventListener('click', () => { if (playerUI.classList.contains('hidden')) { resetUIActivity(); } });
 
-        // CUANDO LA UI ESTÁ VISIBLE, UN TOQUE EN EL CENTRO LA OCULTA
         centerArea.addEventListener('click', (e) => {
-            e.stopPropagation();
-            playerUI.classList.add('hidden'); // Otro toque para ocultar
-            clearTimeout(hideUITimeout);
+            if(e.target === centerArea || e.target === centerIcon) {
+                e.stopPropagation();
+                playerUI.classList.add('hidden');
+                clearTimeout(hideUITimeout);
+            }
         });
 
         function togglePlay() {
             if (video.paused) {
-                video.play();
-                iconPlay.style.display = 'none'; iconPause.style.display = 'block';
-                showCenterIcon('play');
-                resetUIActivity();
+                video.play(); iconPlay.style.display = 'none'; iconPause.style.display = 'block';
+                showCenterIcon('play'); resetUIActivity();
             } else {
-                video.pause();
-                iconPlay.style.display = 'block'; iconPause.style.display = 'none';
-                showCenterIcon('pause');
-                playerUI.classList.remove('hidden');
-                clearTimeout(hideUITimeout);
+                video.pause(); iconPlay.style.display = 'block'; iconPause.style.display = 'none';
+                showCenterIcon('pause'); playerUI.classList.remove('hidden'); clearTimeout(hideUITimeout);
             }
         }
         playPauseBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); });
@@ -780,8 +707,7 @@ def generate_html_files():
         function showCenterIcon(state) {
             cIconPlay.style.display = state === 'play' ? 'block' : 'none';
             cIconPause.style.display = state === 'pause' ? 'block' : 'none';
-            centerIcon.classList.remove('animate');
-            void centerIcon.offsetWidth;
+            centerIcon.classList.remove('animate'); void centerIcon.offsetWidth;
             centerIcon.classList.add('animate');
         }
 
@@ -795,8 +721,7 @@ def generate_html_files():
             if (!video.duration) return;
             timeCurrent.textContent = formatTime(video.currentTime);
             const percent = (video.currentTime / video.duration) * 100;
-            timeProg.style.width = `${percent}%`;
-            timeThumb.style.left = `${percent}%`;
+            timeProg.style.width = `${percent}%`; timeThumb.style.left = `${percent}%`;
 
             if (video.currentTime > 5 && !video.paused && video.currentTime < video.duration - 2) {
                 localStorage.setItem('ry_prog_' + currentVideoId, video.currentTime);
@@ -807,22 +732,24 @@ def generate_html_files():
             e.stopPropagation();
             const rect = timelineCont.getBoundingClientRect();
             const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            video.currentTime = pos * video.duration;
-            resetUIActivity();
+            video.currentTime = pos * video.duration; resetUIActivity();
         });
 
-        rewindBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            video.currentTime = Math.max(0, video.currentTime - 10);
+        // --- SISTEMA DE NAVEGACIÓN DE TIEMPO ±10 SEGUNDOS ---
+        function seekSeconds(seconds) {
+            video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
             resetUIActivity();
-        });
+        }
+
+        rewindBtn.addEventListener('click', (e) => { e.stopPropagation(); seekSeconds(-10); });
+        forwardBtn.addEventListener('click', (e) => { e.stopPropagation(); seekSeconds(10); });
+        seekBackCenterBtn.addEventListener('click', (e) => { e.stopPropagation(); seekSeconds(-10); });
+        seekForwardCenterBtn.addEventListener('click', (e) => { e.stopPropagation(); seekSeconds(10); });
 
         function playNext() {
             localStorage.removeItem('ry_prog_' + currentVideoId);
             if (currentVideoIndex + 1 < currentPlaylist.length) {
-                // Modificamos el historial actual en lugar de añadir uno nuevo para evitar apilar
-                history.replaceState({view: 'player'}, '');
-                closePlayerUI();
+                history.replaceState({view: 'player'}, ''); closePlayerUI();
                 openPlayer(currentPlaylist[currentVideoIndex + 1], currentPlaylist, currentVideoIndex + 1);
             } else { closePlayerAction(); }
         }
@@ -831,10 +758,8 @@ def generate_html_files():
 
         let isFit16_9 = false;
         function toggleResolution() {
-            isFit16_9 = !isFit16_9;
-            video.className = isFit16_9 ? 'fit-16-9' : '';
-            document.getElementById('resBtn').textContent = isFit16_9 ? 'Orig' : '16:9';
-            resetUIActivity();
+            isFit16_9 = !isFit16_9; video.className = isFit16_9 ? 'fit-16-9' : '';
+            document.getElementById('resBtn').textContent = isFit16_9 ? 'Orig' : '16:9'; resetUIActivity();
         }
 
         fullscreenBtn.addEventListener('click', (e) => {
@@ -842,9 +767,7 @@ def generate_html_files():
             if (!document.fullscreenElement) {
                 if (modal.requestFullscreen) modal.requestFullscreen();
                 else if (modal.webkitRequestFullscreen) modal.webkitRequestFullscreen();
-            } else {
-                if (document.exitFullscreen) document.exitFullscreen();
-            }
+            } else { if (document.exitFullscreen) document.exitFullscreen(); }
             resetUIActivity();
         });
     </script>
@@ -854,7 +777,6 @@ def generate_html_files():
 if __name__ == '__main__':
     if not os.path.exists(MEDIA_DIR): os.makedirs(MEDIA_DIR)
     generate_html_files()
-    if not os.path.exists(APK_NAME): open(APK_NAME, 'w').close()
 
     httpd = ThreadingHTTPServer(('0.0.0.0', PORT), RyflixHandler)
     print(f"Servidor MULTIHILO activo en el puerto {PORT}")
