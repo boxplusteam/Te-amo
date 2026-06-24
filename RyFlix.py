@@ -26,12 +26,16 @@ class RyflixHandler(BaseHTTPRequestHandler):
 
         if parsed_path.path == '/' or parsed_path.path == '/index.html':
             self.serve_file('index.html', 'text/html')
+        elif parsed_path.path == '/server.html':
+            self.serve_file('server.html', 'text/html')
         elif parsed_path.path == '/api/media':
             self.serve_api(query)
         elif parsed_path.path == '/stream':
             self.serve_stream(query)
         elif parsed_path.path == '/img':
             self.serve_image(query)
+        elif parsed_path.path == '/download_apk':
+            self.serve_apk()
         else:
             self.send_error(404, "No encontrado")
 
@@ -43,6 +47,28 @@ class RyflixHandler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.end_headers()
         with open(filename, 'rb') as f:
+            shutil.copyfileobj(f, self.wfile)
+
+    def serve_apk(self):
+        apk_path = None
+        # Buscar el primer archivo .apk en la carpeta MEDIA_DIR
+        if os.path.exists(MEDIA_DIR):
+            for file in os.listdir(MEDIA_DIR):
+                if file.lower().endswith('.apk'):
+                    apk_path = os.path.join(MEDIA_DIR, file)
+                    break
+        
+        if not apk_path or not os.path.exists(apk_path):
+            return self.send_error(404, "Archivo APK no encontrado en la carpeta flix")
+            
+        file_size = os.path.getsize(apk_path)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/vnd.android.package-archive')
+        self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(apk_path)}"')
+        self.send_header('Content-Length', str(file_size))
+        self.send_cors_headers()
+        self.end_headers()
+        with open(apk_path, 'rb') as f:
             shutil.copyfileobj(f, self.wfile)
 
     def find_image_for(self, item_name, folder_path=None):
@@ -172,8 +198,44 @@ class RyflixHandler(BaseHTTPRequestHandler):
 
 # --- GENERACIÓN AUTOMÁTICA DE HTML ---
 def generate_html_files():
+    # --- NUEVO INDEX.HTML CON BOTÓN DE DESCARGA ---
     if not os.path.exists('index.html'):
         with open('index.html', 'w', encoding='utf-8') as f:
+            f.write("""<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#120924">
+    <title>Descargar Ryflix APK</title>
+    <style>
+        :root { --bg: #120924; --lime: #39ff14; --lime-hover: #2cf00a; --text: #ffffff; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center; }
+        .logo-title { font-size: 3rem; font-weight: 900; margin-bottom: 10px; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .subtitle { color: #a0a0ab; margin-bottom: 40px; }
+        .download-btn { display: inline-flex; align-items: center; gap: 10px; background: var(--lime); color: #000; text-decoration: none; padding: 16px 36px; border-radius: 40px; font-weight: 800; font-size: 1.1rem; box-shadow: 0 4px 20px rgba(57,255,20,0.4); transition: all 0.2s; }
+        .download-btn:active, .download-btn:hover { transform: scale(0.95); background: var(--lime-hover); }
+        .download-btn svg { width: 24px; height: 24px; fill: #000; }
+        .web-link { margin-top: 30px; color: #a0a0ab; text-decoration: none; font-weight: 600; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+        .web-link:hover { color: #fff; border-color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="logo-title">Ryflix</div>
+    <div class="subtitle">Cuevana Premium directamente en tu móvil</div>
+    
+    <a href="/download_apk" class="download-btn">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        Descargar APK
+    </a>
+
+    <a href="/server.html" class="web-link">O usar la versión Web</a>
+</body>
+</html>""")
+
+    # --- ANTIGUO INDEX.HTML AHORA ES SERVER.HTML ---
+    if not os.path.exists('server.html'):
+        with open('server.html', 'w', encoding='utf-8') as f:
             f.write("""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -181,58 +243,80 @@ def generate_html_files():
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#09090e">
+    <meta name="theme-color" content="#120924">
     <title>Ryflix - Cuevana Premium</title>
     <style>
-        :root { --bg: #09090e; --surface: #13131a; --red: #ff003c; --red-hover: #ff2a5f; --text: #ffffff; --text-muted: #a0a0ab; --border: rgba(255, 255, 255, 0.08); }
+        :root { --bg: #120924; --surface: #1d1433; --lime: #39ff14; --lime-hover: #2cf00a; --text: #ffffff; --text-muted: #a0a0ab; --border: rgba(255, 255, 255, 0.08); }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, sans-serif; user-select: none; }
         body { margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden; padding-bottom: 40px; overscroll-behavior-y: none; }
 
         @keyframes fadeInScale { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
-        /* HEADER al estilo Cuevana */
-        header { padding: env(safe-area-inset-top, 15px) 24px 15px; display: flex; justify-content: space-between; align-items: center; position: fixed; top: 0; width: 100%; background: linear-gradient(to bottom, rgba(9,9,14,0.95) 0%, rgba(9,9,14,0.8) 50%, transparent 100%); z-index: 100; transition: all 0.3s ease; }
-        header.scrolled { background: rgba(19,19,26,0.96); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); box-shadow: 0 4px 30px rgba(0,0,0,0.4); }
-        .logo { color: var(--text); font-size: 1.7rem; font-weight: 900; font-style: italic; cursor: pointer; letter-spacing: 0.5px; text-shadow: 0 0 15px rgba(255,0,60,0.6); }
-        .logo span { color: var(--red); }
-        .header-controls { display: flex; align-items: center; gap: 16px; }
+        /* HEADER con buscador centrado y sin logo - MODIFICADO PARA BAJARLO */
+        header { 
+            padding: calc(env(safe-area-inset-top, 15px) + 15px) 24px 20px; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            position: fixed; 
+            top: 0; 
+            width: 100%; 
+            background: linear-gradient(to bottom, rgba(18,9,36,0.98) 0%, rgba(18,9,36,0.85) 60%, transparent 100%); 
+            z-index: 100; 
+            transition: all 0.3s ease; 
+        }
+        header.scrolled { background: rgba(29,20,51,0.96); backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); box-shadow: 0 4px 30px rgba(0,0,0,0.4); padding-bottom: 15px; }
+        
+        /* Controles con MARGEN SUPERIOR para bajarlos forzosamente */
+        .header-controls { 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            gap: 16px; 
+            width: 100%; 
+            max-width: 600px; 
+            margin-top: 20px; /* AQUÍ ESTÁ EL MARGEN PARA BAJAR BUSCAR Y FAV */
+        }
 
-        .bt-border { background: rgba(255,255,255,0.06); color: white; border: 1px solid var(--border); padding: 8px 18px; border-radius: 30px; font-weight: 600; cursor: pointer; font-size: 0.85rem; transition: all 0.2s ease; backdrop-filter: blur(5px); }
+        .bt-border { background: rgba(255,255,255,0.06); color: white; border: 1px solid var(--border); padding: 10px 20px; border-radius: 30px; font-weight: 600; cursor: pointer; font-size: 0.9rem; transition: all 0.2s ease; backdrop-filter: blur(5px); flex-shrink: 0; }
         .bt-border:hover, .bt-border:active { background: rgba(255,255,255,0.12); transform: scale(0.96); }
-        .bt-border.active { border-color: var(--red); color: white; background: var(--red); box-shadow: 0 0 15px rgba(255,0,60,0.4); }
+        .bt-border.active { border-color: var(--lime); color: #000000; background: var(--lime); box-shadow: 0 0 15px rgba(57,255,20,0.4); }
 
-        .search-box { display: flex; align-items: center; background: rgba(255,255,255,0.04); border: 1px solid var(--border); padding: 6px 14px; border-radius: 30px; transition: all 0.3s ease; }
-        .search-box:focus-within { border-color: rgba(255,0,60,0.5); background: rgba(255,255,255,0.07); }
-        .search-box input { background: transparent; border: none; color: white; outline: none; width: 110px; font-size: 0.9rem; transition: width 0.3s; }
-        .search-box input:focus { width: 160px; }
+        .search-box { display: flex; align-items: center; background: rgba(255,255,255,0.04); border: 1px solid var(--border); padding: 8px 18px; border-radius: 30px; transition: all 0.3s ease; flex: 1; }
+        .search-box:focus-within { border-color: rgba(57,255,20,0.5); background: rgba(255,255,255,0.07); }
+        .search-box input { background: transparent; border: none; color: white; outline: none; width: 100%; font-size: 0.95rem; text-align: center; }
 
         /* HERO SLIDER */
-        .hero-slider { position: relative; width: 100%; height: 55vh; background: #000; overflow: hidden; display: none; border-bottom: 1px solid var(--border); }
+        .hero-slider { position: relative; width: 100%; height: 55vh; min-height: 400px; background: #000; overflow: hidden; display: none; border-bottom: 1px solid var(--border); }
         .hero-slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 1s cubic-bezier(0.4, 0, 0.2, 1); background-size: cover; background-position: center 20%; display: flex; flex-direction: column; justify-content: flex-end; }
         .hero-slide.active { opacity: 1; z-index: 2; }
-        .hero-slide::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 80%; background: linear-gradient(to top, var(--bg) 0%, rgba(9,9,14,0.4) 60%, transparent 100%); z-index: 0; }
+        .hero-slide::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 80%; background: linear-gradient(to top, var(--bg) 0%, rgba(18,9,36,0.4) 60%, transparent 100%); z-index: 0; }
         .hero-content { position: relative; z-index: 3; padding: 24px; margin-bottom: 15px; text-align: center; max-width: 600px; margin-left: auto; margin-right: auto; }
-        .hero-title { font-size: 2.2rem; font-weight: 850; text-shadow: 0 2px 10px rgba(0,0,0,0.9); margin: 0 0 16px 0; letter-spacing: -0.5px; }
-        .hero-btn { display: inline-flex; align-items: center; gap: 10px; background: var(--red); color: white; border: none; padding: 12px 28px; border-radius: 30px; font-weight: 700; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 15px rgba(255,0,60,0.3); transition: all 0.2s; }
-        .hero-btn:active { transform: scale(0.95); background: var(--red-hover); }
-        .hero-btn svg { width: 20px; height: 20px; fill: white; }
+        .hero-title { font-size: 2rem; font-weight: 850; text-shadow: 0 2px 10px rgba(0,0,0,0.9); margin: 0 0 16px 0; letter-spacing: -0.5px; line-height: 1.1; }
+        .hero-btn { display: inline-flex; align-items: center; gap: 10px; background: var(--lime); color: #000000; border: none; padding: 12px 28px; border-radius: 30px; font-weight: 700; font-size: 0.95rem; cursor: pointer; box-shadow: 0 4px 15px rgba(57,255,20,0.3); transition: all 0.2s; }
+        .hero-btn:active { transform: scale(0.95); background: var(--lime-hover); }
+        .hero-btn svg { width: 20px; height: 20px; fill: #000000; }
 
-        /* CATALOG GRID MÁS ESTILIZADO */
-        .section-title { font-size: 1.35rem; margin: 24px 24px 16px; font-weight: 800; letter-spacing: -0.3px; color: white; position: relative; display: inline-block; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); gap: 14px; padding: 0 24px; }
-        .card { background: var(--surface); border-radius: 10px; overflow: hidden; position: relative; cursor: pointer; animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards; border: 1px solid var(--border); transition: all 0.25s ease; }
-        .card:active { transform: scale(0.96); border-color: rgba(255,0,60,0.3); }
-        .poster { width: 100%; aspect-ratio: 2/3; background: #181824; display: flex; align-items: center; justify-content: center; }
+        /* DISEÑO DE FILAS CON SCROLL DE IZQUIERDA A DERECHA */
+        .carousel-section { margin-bottom: 28px; width: 100%; }
+        .carousel-title { font-size: 1.2rem; margin: 24px 24px 12px; font-weight: 800; letter-spacing: -0.3px; color: white; }
+        .carousel-track { display: flex; overflow-x: auto; gap: 14px; padding: 0 24px; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scroll-behavior: smooth; }
+        .carousel-track::-webkit-scrollbar { display: none; }
+
+        /* RESPONSIVE BASE FLUIDA (Móviles) */
+        .card { flex: 0 0 32vw; max-width: 140px; min-width: 105px; scroll-snap-align: start; background: var(--surface); border-radius: 10px; overflow: hidden; position: relative; cursor: pointer; animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards; border: 1px solid var(--border); transition: all 0.25s ease; }
+        .card:active { transform: scale(0.96); border-color: rgba(57,255,20,0.3); }
+        .poster { width: 100%; aspect-ratio: 2/3; background: #1e1736; display: flex; align-items: center; justify-content: center; }
         .poster img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
-        .poster-alt { font-size: 2.8rem; font-weight: 900; color: #2a2a3a; text-transform: uppercase; }
+        .poster-alt { font-size: 2.8rem; font-weight: 900; color: #2d234d; text-transform: uppercase; }
         .card-title { padding: 12px 10px; font-size: 0.85rem; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: #f3f3f5; }
 
-        .fav-icon { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; background: rgba(19,19,26,0.7); backdrop-filter: blur(8px); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s; }
+        .fav-icon { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; background: rgba(29,20,51,0.7); backdrop-filter: blur(8px); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s; }
         .fav-icon svg { width: 15px; height: 15px; fill: white; transition: transform 0.2s; }
-        .fav-icon.active { background: rgba(255,0,60,0.15); border-color: var(--red); }
-        .fav-icon.active svg { fill: var(--red); transform: scale(1.1); }
+        .fav-icon.active { background: rgba(57,255,20,0.15); border-color: var(--lime); }
+        .fav-icon.active svg { fill: var(--lime); transform: scale(1.1); }
 
-        .loader { width: 32px; height: 32px; border: 3.5px solid rgba(255,255,255,0.05); border-top-color: var(--red); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 40px auto; display: none; }
+        .loader { width: 32px; height: 32px; border: 3.5px solid rgba(255,255,255,0.05); border-top-color: var(--lime); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 40px auto; display: none; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* SECCIÓN DE DETALLES DE SERIES */
@@ -246,18 +330,18 @@ def generate_html_files():
         .back-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.12); }
         .back-btn svg { width: 22px; height: 22px; fill: white; }
 
-        .series-details { display: flex; flex-direction: column; gap: 24px; margin-bottom: 40px; }
-        .series-poster-main { width: 150px; aspect-ratio: 2/3; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.7); object-fit: cover; align-self: center; border: 1px solid var(--border); }
+        .series-details { display: flex; flex-direction: column; gap: 24px; margin-bottom: 40px; align-items: center; }
+        .series-poster-main { width: 45vw; max-width: 200px; aspect-ratio: 2/3; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.7); object-fit: cover; border: 1px solid var(--border); }
         .series-info-text { text-align: center; }
         .series-title-main { font-size: 2.2rem; font-weight: 850; text-shadow: 0 2px 10px rgba(0,0,0,0.8); margin: 0 0 10px 0; letter-spacing: -0.5px; }
         .series-meta { font-size: 0.95rem; color: var(--text-muted); font-weight: 600; }
 
-        .episodes-title { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; border-left: 4px solid var(--red); padding-left: 12px; }
+        .episodes-title { font-size: 1.3rem; font-weight: 800; margin-bottom: 20px; border-left: 4px solid var(--lime); padding-left: 12px; }
         .episodes-list { display: flex; flex-direction: column; gap: 12px; }
         .episode-row { display: flex; align-items: center; gap: 16px; padding: 14px; background: var(--surface); border-radius: 10px; border: 1px solid var(--border); cursor: pointer; transition: all 0.2s ease; }
-        .episode-row:active { background: rgba(255,255,255,0.05); border-color: rgba(255,0,60,0.2); }
+        .episode-row:active { background: rgba(255,255,255,0.05); border-color: rgba(57,255,20,0.2); }
 
-        .ep-thumb { width: 120px; aspect-ratio: 16/9; background: #181824; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; flex-shrink: 0; }
+        .ep-thumb { width: 120px; aspect-ratio: 16/9; background: #1e1736; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; flex-shrink: 0; }
         .ep-thumb img { width: 100%; height: 100%; object-fit: cover; }
         .ep-thumb-icon { position: absolute; width: 26px; height: 26px; fill: white; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.7)); }
         .ep-info { flex: 1; overflow: hidden; }
@@ -276,8 +360,8 @@ def generate_html_files():
         .p-top-bar { padding: env(safe-area-inset-top, 20px) 24px 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent); display: flex; align-items: center; gap: 16px; }
         .p-title { flex: 1; font-weight: 700; font-size: 1.15rem; text-shadow: 0 2px 5px rgba(0,0,0,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        .p-center-area { flex: 1; display: flex; align-items: center; justify-content: center; gap: 40px; cursor: pointer; width: 100%; }
-        .p-center-icon { width: 66px; height: 66px; background: rgba(19,19,26,0.75); border: 1px solid var(--border); border-radius: 50%; display: flex; justify-content: center; align-items: center; opacity: 0; transform: scale(0.8); transition: all 0.2s ease-out; pointer-events: none; backdrop-filter: blur(8px); }
+        .p-center-area { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10vw; cursor: pointer; width: 100%; }
+        .p-center-icon { width: 66px; height: 66px; background: rgba(29,20,51,0.75); border: 1px solid var(--border); border-radius: 50%; display: flex; justify-content: center; align-items: center; opacity: 0; transform: scale(0.8); transition: all 0.2s ease-out; pointer-events: none; backdrop-filter: blur(8px); }
         .p-center-icon svg { width: 30px; height: 30px; fill: white; }
         .p-center-icon.animate { opacity: 1; transform: scale(1.1); }
 
@@ -289,40 +373,60 @@ def generate_html_files():
 
         .p-timeline-container { width: 100%; height: 24px; display: flex; align-items: center; cursor: pointer; position: relative; }
         .p-timeline-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.15); border-radius: 4px; position: relative; }
-        .p-timeline-progress { height: 100%; background: var(--red); border-radius: 4px; width: 0%; position: absolute; box-shadow: 0 0 10px rgba(255,0,60,0.5); }
-        .p-timeline-thumb { width: 16px; height: 16px; background: var(--red); border-radius: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); left: 0%; box-shadow: 0 0 8px rgba(0,0,0,0.8); }
+        .p-timeline-progress { height: 100%; background: var(--lime); border-radius: 4px; width: 0%; position: absolute; box-shadow: 0 0 10px rgba(57,255,20,0.5); }
+        .p-timeline-thumb { width: 16px; height: 16px; background: var(--lime); border-radius: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); left: 0%; box-shadow: 0 0 8px rgba(0,0,0,0.8); }
 
         .p-controls-row { display: flex; justify-content: space-between; align-items: center; }
-        .p-controls-left, .p-controls-right { display: flex; align-items: center; gap: 28px; }
+        .p-controls-left, .p-controls-right { display: flex; align-items: center; gap: 20px; }
 
         .p-icon-btn { background: transparent; border: none; padding: 0; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: transform 0.15s; }
         .p-icon-btn:active { transform: scale(0.9); }
         .p-icon-btn svg { width: 32px; height: 32px; fill: white; }
 
-        .p-time { font-size: 0.9rem; opacity: 0.9; font-weight: 600; font-variant-numeric: tabular-nums; color: #e3e3e8; }
+        .p-time { font-size: 0.9rem; opacity: 0.9; font-weight: 600; font-variant-numeric: tabular-nums; color: #e3e3e8; display: none; }
         .p-res-btn { font-size: 0.85rem; font-weight: 700; color: white; background: rgba(255,255,255,0.08); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
 
+        /* --- MEDIA QUERIES PARA ADAPTACIÓN TOTAL (TABLETS Y PC) --- */
+        
+        /* Smartphones grandes y Tablets pequeñas (Portrait) */
+        @media (min-width: 480px) {
+            .card { flex: 0 0 135px; }
+            .p-time { display: block; }
+            .hero-title { font-size: 2.5rem; }
+        }
+
+        /* Tablets y Escritorio */
         @media (min-width: 768px) {
-            .grid { grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 18px; padding: 0 32px; }
-            .section-title { margin: 30px 32px 20px; font-size: 1.5rem; }
+            .card { flex: 0 0 160px; max-width: none; }
+            .carousel-track { gap: 20px; padding: 0 32px; }
+            .carousel-title { margin: 24px 32px 14px; font-size: 1.5rem; }
+            
             .series-details { flex-direction: row; align-items: flex-end; text-align: left; gap: 32px; margin-top: 20px; }
-            .series-poster-main { width: 190px; }
+            .series-poster-main { width: 220px; }
             .series-info-text { text-align: left; }
-            .series-title-main { font-size: 3rem; }
-            .episodes-list { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .series-title-main { font-size: 3.2rem; }
+            .episodes-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+            
+            .p-controls-left, .p-controls-right { gap: 28px; }
             .p-icon-btn svg { width: 36px; height: 36px; }
-            .p-side-seek-btn svg { width: 42px; height: 42px; font-size: 0.85rem; }
+            .p-side-seek-btn svg { width: 48px; height: 48px; }
+            .p-side-seek-btn span { font-size: 0.9rem; }
+        }
+
+        /* Monitores Grandes */
+        @media (min-width: 1024px) {
+            .card { flex: 0 0 180px; }
+            .hero-title { font-size: 3.5rem; }
+            .carousel-section { max-width: 1400px; margin: 0 auto 35px auto; }
+            header .header-controls { max-width: 800px; }
         }
     </style>
 </head>
 <body>
     <header id="appHeader">
-        <div class="header-left">
-            <div class="logo" onclick="goHomeAction()">RY<span>FLIX</span></div>
-        </div>
         <div class="header-controls">
             <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Buscar..." autocomplete="off">
+                <input type="text" id="searchInput" placeholder="Buscar películas o series..." autocomplete="off">
             </div>
             <button class="bt-border" id="favToggleBtn" onclick="toggleFavView()">Favs</button>
         </div>
@@ -330,8 +434,7 @@ def generate_html_files():
 
     <div id="homeSection">
         <div class="hero-slider" id="heroSlider"></div>
-        <h2 class="section-title" id="mainTitle">Películas y Series</h2>
-        <div class="grid" id="grid"></div>
+        <div id="rowsContainer"></div>
         <div class="loader" id="loader"></div>
     </div>
 
@@ -426,15 +529,14 @@ def generate_html_files():
         const API = window.location.origin;
         let allMedia = [], currentFiltered = [];
         let favorites = JSON.parse(localStorage.getItem('ryflix_favs')) || [];
-
-        let displayedCount = 0; const CHUNK_SIZE = 30; let showingFavs = false;
+        let showingFavs = false;
 
         let currentPlaylist = [];
         let currentVideoIndex = -1;
         let heroInterval;
         let hideUITimeout;
 
-        const grid = document.getElementById('grid');
+        const rowsContainer = document.getElementById('rowsContainer');
         const loader = document.getElementById('loader');
         const homeSection = document.getElementById('homeSection');
         const seriesSection = document.getElementById('seriesSection');
@@ -461,22 +563,18 @@ def generate_html_files():
         window.addEventListener('scroll', () => {
             if (window.scrollY > 30) header.classList.add('scrolled');
             else header.classList.remove('scrolled');
-
-            if (homeSection.style.display !== 'none' && !showingFavs) {
-                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 200) loadNextChunk();
-            }
         });
 
         document.addEventListener('DOMContentLoaded', fetchCatalog);
 
         function fetchCatalog() {
-            grid.innerHTML = ''; loader.style.display = 'block';
+            rowsContainer.innerHTML = ''; loader.style.display = 'block';
             fetch(API + '/api/media').then(r => r.json()).then(data => {
-                allMedia = data; currentFiltered = [...allMedia]; displayedCount = 0;
+                allMedia = data; currentFiltered = [...allMedia];
                 loader.style.display = 'none';
                 initHeroSlider();
-                loadNextChunk();
-            }).catch(() => { loader.style.display = 'none'; grid.innerHTML = '<p style="padding:24px;">Error de conexión.</p>'; });
+                renderCarousels();
+            }).catch(() => { loader.style.display = 'none'; rowsContainer.innerHTML = '<p style="padding:24px;">Error de conexión.</p>'; });
         }
 
         function initHeroSlider() {
@@ -522,32 +620,65 @@ def generate_html_files():
             if (item.is_folder || item.type === 'series') { openSeries(item); } else { openPlayer(item, [item], 0); }
         };
 
-        function loadNextChunk() {
-            if (displayedCount >= currentFiltered.length) return;
-            const chunk = currentFiltered.slice(displayedCount, displayedCount + CHUNK_SIZE);
-            chunk.forEach(item => grid.appendChild(createCard(item)));
-            displayedCount += CHUNK_SIZE;
+        function renderCarousels() {
+            rowsContainer.innerHTML = '';
+            if (currentFiltered.length === 0) {
+                rowsContainer.innerHTML = '<p style="margin:24px; color:var(--text-muted); text-align:center;">No se encontraron resultados.</p>';
+                return;
+            }
+
+            const MAX_ROWS = 4;
+            const ITEMS_PER_ROW = 10;
+
+            for (let i = 0; i < MAX_ROWS; i++) {
+                const startIdx = i * ITEMS_PER_ROW;
+                if (startIdx >= currentFiltered.length) break;
+
+                const chunk = currentFiltered.slice(startIdx, startIdx + ITEMS_PER_ROW);
+
+                const section = document.createElement('div');
+                section.className = 'carousel-section';
+
+                const title = document.createElement('h2');
+                title.className = 'carousel-title';
+                title.textContent = showingFavs ? `Mi Lista - Grupo ${i + 1}` : `Colección ${i + 1}`;
+
+                const track = document.createElement('div');
+                track.className = 'carousel-track';
+
+                chunk.forEach(item => {
+                    track.appendChild(createCard(item));
+                });
+
+                section.appendChild(title);
+                section.appendChild(track);
+                rowsContainer.appendChild(section);
+            }
         }
 
         searchInput.addEventListener('input', (e) => {
             const val = e.target.value.toLowerCase().trim();
-            if(showingFavs) toggleFavView();
+            if(showingFavs) {
+                showingFavs = false;
+                document.getElementById('favToggleBtn').classList.remove('active');
+            }
             document.getElementById('heroSlider').style.display = val === '' ? 'block' : 'none';
             currentFiltered = val === '' ? [...allMedia] : allMedia.filter(i => i.name.toLowerCase().includes(val));
-            grid.innerHTML = ''; displayedCount = 0; loadNextChunk();
+            renderCarousels();
         });
 
         function toggleFavView() {
-            showingFavs = !showingFavs; grid.innerHTML = '';
+            showingFavs = !showingFavs;
             document.getElementById('favToggleBtn').classList.toggle('active');
-            document.getElementById('mainTitle').textContent = showingFavs ? 'Mi Lista' : 'Películas y Series';
             document.getElementById('heroSlider').style.display = showingFavs ? 'none' : 'block';
 
             if (showingFavs) {
-                const favItems = allMedia.filter(item => favorites.includes(item.folder || item.file));
-                if (favItems.length === 0) grid.innerHTML = '<p style="margin:24px; color:var(--text-muted);">Tu lista está vacía.</p>';
-                else favItems.forEach(item => grid.appendChild(createCard(item)));
-            } else { searchInput.value = ''; currentFiltered = [...allMedia]; displayedCount = 0; loadNextChunk(); }
+                currentFiltered = allMedia.filter(item => favorites.includes(item.folder || item.file));
+            } else { 
+                searchInput.value = ''; 
+                currentFiltered = [...allMedia]; 
+            }
+            renderCarousels();
         }
 
         function toggleFavorite(e, id) {
@@ -556,7 +687,10 @@ def generate_html_files():
             if (idx > -1) favorites.splice(idx, 1); else favorites.push(id);
             localStorage.setItem('ryflix_favs', JSON.stringify(favorites));
             e.currentTarget.classList.toggle('active');
-            if (showingFavs) { grid.innerHTML = ''; toggleFavView(); toggleFavView(); }
+            if (showingFavs) {
+                currentFiltered = allMedia.filter(item => favorites.includes(item.folder || item.file));
+                renderCarousels();
+            }
         }
 
         function createCard(item) {
@@ -735,7 +869,6 @@ def generate_html_files():
             video.currentTime = pos * video.duration; resetUIActivity();
         });
 
-        // --- SISTEMA DE NAVEGACIÓN DE TIEMPO ±10 SEGUNDOS ---
         function seekSeconds(seconds) {
             video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
             resetUIActivity();
@@ -780,5 +913,6 @@ if __name__ == '__main__':
 
     httpd = ThreadingHTTPServer(('0.0.0.0', PORT), RyflixHandler)
     print(f"Servidor MULTIHILO activo en el puerto {PORT}")
-    print(f"Abre http://localhost:8000/index.html para ver el inicio")
+    print(f"Página de Descarga APK: http://localhost:{PORT}/index.html")
+    print(f"Página Web de Ryflix:   http://localhost:{PORT}/server.html")
     httpd.serve_forever()
